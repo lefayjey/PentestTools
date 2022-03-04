@@ -5,7 +5,7 @@
 # Author: Diego Blanco <diego.blanco@treitos.com>
 # GitHub: https://github.com/diego-treitos/linux-smart-enumeration
 #
-lse_version="3.9"
+lse_version="3.10"
 
 #( Colors
 #
@@ -117,6 +117,7 @@ lse_common_setuid="
 /usr/bin/firejail
 /usr/bin/fusermount
 /usr/bin/fusermount-glusterfs
+/usr/bin/fusermount3
 /usr/bin/gpasswd
 /usr/bin/kismet_capture
 /usr/bin/mount
@@ -124,6 +125,7 @@ lse_common_setuid="
 /usr/bin/newgidmap
 /usr/bin/newgrp
 /usr/bin/newuidmap
+/usr/bin/ntfs-3g
 /usr/bin/passwd
 /usr/bin/pkexec
 /usr/bin/pmount
@@ -550,17 +552,26 @@ lse_procmon() {
 }
 lse_proc_print() {
   # Pretty prints output from lse_procmom received via stdin
-  printf "${green}%s %8s %8s %s\n" "START" "PID" "USER" "COMMAND"
+  if $lse_color; then
+    printf "${green}%s %8s %8s %s\n" "START" "PID" "USER" "COMMAND"
+  else
+    printf "%s %8s %8s %s\n" "START" "PID" "USER" "COMMAND"
+  fi
   while read -r l; do
     p_num=`echo "$l" | cut -d" " -f1`
     p_time=`echo "$l" | cut -d" " -f2`
     p_pid=`echo "$l" | cut -d" " -f3`
     p_user=`echo "$l" | cut -d" " -f4`
     p_args=`echo "$l" | cut -d" " -f5-`
-    if [ $((p_num)) -lt 20 ]; then # few times probably periodic
-      printf "${red}%s ${reset}%8s ${yellow}%8s ${red}%s\n" "$p_time" "$p_pid" "$p_user" "$p_args"
+
+    if $lse_color; then
+      if [ $((p_num)) -lt 20 ]; then # few times probably periodic
+        printf "${red}%s ${reset}%8s ${yellow}%8s ${red}%s\n" "$p_time" "$p_pid" "$p_user" "$p_args"
+      else
+        printf "${magenta}%s ${reset}%8s ${yellow}%8s ${reset}%s\n" "$p_time" "$p_pid" "$p_user" "$p_args"
+      fi
     else
-      printf "${magenta}%s ${reset}%8s ${yellow}%8s ${reset}%s\n" "$p_time" "$p_pid" "$p_user" "$p_args"
+      printf "%s %8s %8s %s\n" "$p_time" "$p_pid" "$p_user" "$p_args"
     fi
   done
 }
@@ -803,7 +814,7 @@ lse_run_tests_filesystem() {
   #are there possible credentials in any shell history files
   lse_test "fst200" "0" \
     "Are there possible credentials in any shell history file?" \
-    'for h in .bash_history .history .histfile .zhistory; do [ -f "$lse_home/$h" ] && grep $lse_grep_opts -Ei "(user|username|login|pass|password|pw|credentials)[=: ][a-z0-9]+" "$lse_home/$h"; done'
+    'for h in .bash_history .history .histfile .zhistory; do [ -f "$lse_home/$h" ] && grep $lse_grep_opts -Ei "(user|username|login|pass|password|pw|credentials)[=: ][a-z0-9]+" "$lse_home/$h" | grep -v "systemctl"; done'
 
   #nfs exports with no_root_squash
   lse_test "fst210" "0" \
