@@ -3394,284 +3394,149 @@ A custom PSObject with LDAP hashtable properties translated.
 #
 ########################################################
 
-function Get-DomainSearcher {
+filter Get-DomainSearcher {
 <#
-.SYNOPSIS
+    .SYNOPSIS
 
-Helper used by various functions that builds a custom AD searcher object.
+        Helper used by various functions that takes an ADSpath and
+        domain specifier and builds the correct ADSI searcher object.
 
-Author: Will Schroeder (@harmj0y)  
-License: BSD 3-Clause  
-Required Dependencies: Get-Domain  
+    .PARAMETER Domain
 
-.DESCRIPTION
+        The domain to use for the query, defaults to the current domain.
 
-Takes a given domain and a number of customizations and returns a
-System.DirectoryServices.DirectorySearcher object. This function is used
-heavily by other LDAP/ADSI searcher functions (Verb-Domain*).
+    .PARAMETER DomainController
 
-.PARAMETER Domain
+        Domain controller to reflect LDAP queries through.
 
-Specifies the domain to use for the query, defaults to the current domain.
+    .PARAMETER ADSpath
 
-.PARAMETER LDAPFilter
+        The LDAP source to search through, e.g. "LDAP://OU=secret,DC=testlab,DC=local"
+        Useful for OU queries.
 
-Specifies an LDAP query string that is used to filter Active Directory objects.
+    .PARAMETER ADSprefix
 
-.PARAMETER Properties
+        Prefix to set for the searcher (like "CN=Sites,CN=Configuration")
 
-Specifies the properties of the output object to retrieve from the server.
+    .PARAMETER PageSize
 
-.PARAMETER SearchBase
+        The PageSize to set for the LDAP searcher object.
 
-The LDAP source to search through, e.g. "LDAP://OU=secret,DC=testlab,DC=local"
-Useful for OU queries.
+    .PARAMETER Credential
 
-.PARAMETER SearchBasePrefix
+        A [Management.Automation.PSCredential] object of alternate credentials
+        for connection to the target domain.
 
-Specifies a prefix for the LDAP search string (i.e. "CN=Sites,CN=Configuration").
+    .EXAMPLE
 
-.PARAMETER Server
+        PS C:\> Get-DomainSearcher -Domain testlab.local
 
-Specifies an Active Directory server (domain controller) to bind to for the search.
+    .EXAMPLE
 
-.PARAMETER SearchScope
-
-Specifies the scope to search under, Base/OneLevel/Subtree (default of Subtree).
-
-.PARAMETER ResultPageSize
-
-Specifies the PageSize to set for the LDAP searcher object.
-
-.PARAMETER ResultPageSize
-
-Specifies the PageSize to set for the LDAP searcher object.
-
-.PARAMETER ServerTimeLimit
-
-Specifies the maximum amount of time the server spends searching. Default of 120 seconds.
-
-.PARAMETER SecurityMasks
-
-Specifies an option for examining security information of a directory object.
-One of 'Dacl', 'Group', 'None', 'Owner', 'Sacl'.
-
-.PARAMETER Tombstone
-
-Switch. Specifies that the searcher should also return deleted/tombstoned objects.
-
-.PARAMETER Credential
-
-A [Management.Automation.PSCredential] object of alternate credentials
-for connection to the target domain.
-
-.EXAMPLE
-
-Get-DomainSearcher -Domain testlab.local
-
-Return a searcher for all objects in testlab.local.
-
-.EXAMPLE
-
-Get-DomainSearcher -Domain testlab.local -LDAPFilter '(samAccountType=805306368)' -Properties 'SamAccountName,lastlogon'
-
-Return a searcher for user objects in testlab.local and only return the SamAccountName and LastLogon properties.
-
-.EXAMPLE
-
-Get-DomainSearcher -SearchBase "LDAP://OU=secret,DC=testlab,DC=local"
-
-Return a searcher that searches through the specific ADS/LDAP search base (i.e. OU).
-
-.OUTPUTS
-
-System.DirectoryServices.DirectorySearcher
+        PS C:\> Get-DomainSearcher -Domain testlab.local -DomainController SECONDARY.dev.testlab.local
 #>
 
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSShouldProcess', '')]
-    [OutputType('System.DirectoryServices.DirectorySearcher')]
-    [CmdletBinding()]
-    Param(
-        [Parameter(ValueFromPipeline = $True)]
-        [ValidateNotNullOrEmpty()]
+    param(
+        [Parameter(ValueFromPipeline=$True)]
         [String]
         $Domain,
 
-        [ValidateNotNullOrEmpty()]
-        [Alias('Filter')]
         [String]
-        $LDAPFilter,
+        $DomainController,
 
-        [ValidateNotNullOrEmpty()]
-        [String[]]
-        $Properties,
-
-        [ValidateNotNullOrEmpty()]
-        [Alias('ADSPath')]
         [String]
-        $SearchBase,
+        $ADSpath,
 
-        [ValidateNotNullOrEmpty()]
         [String]
-        $SearchBasePrefix,
+        $ADSprefix,
 
-        [ValidateNotNullOrEmpty()]
-        [Alias('DomainController')]
-        [String]
-        $Server,
-
-        [ValidateSet('Base', 'OneLevel', 'Subtree')]
-        [String]
-        $SearchScope = 'Subtree',
-
-        [ValidateRange(1, 10000)]
+        [ValidateRange(1,10000)] 
         [Int]
-        $ResultPageSize = 200,
-
-        [ValidateRange(1, 10000)]
-        [Int]
-        $ServerTimeLimit = 120,
-
-        [ValidateSet('Dacl', 'Group', 'None', 'Owner', 'Sacl')]
-        [String]
-        $SecurityMasks,
-
-        [Switch]
-        $Tombstone,
+        $PageSize = 200,
 
         [Management.Automation.PSCredential]
-        [Management.Automation.CredentialAttribute()]
-        $Credential = [Management.Automation.PSCredential]::Empty
+        $Credential
     )
 
-    PROCESS {
-        if ($PSBoundParameters['Domain']) {
-            $TargetDomain = $Domain
+    if(!$Credential) {
+        if(!$Domain){
+            $Domain = (Get-NetDomain).name
+        }
+        elseif(!$DomainController) {
+            try {
+                # if there's no -DomainController specified, try to pull the primary DC
+                #   to reflect queries through
+                $DomainController = ((Get-NetDomain).PdcRoleOwner).Name
+            }
+            catch {
+                throw "Get-DomainSearcher: Error in retrieving PDC for current domain"
+            }
+        }
+    }
+    elseif (!$DomainController) {
+        try {
+            $DomainController = ((Get-NetDomain -Credential $Credential).PdcRoleOwner).Name
+        }
+        catch {
+            throw "Get-DomainSearcher: Error in retrieving PDC for current domain"
+        }
 
-            if ($ENV:USERDNSDOMAIN -and ($ENV:USERDNSDOMAIN.Trim() -ne '')) {
-                # see if we can grab the user DNS logon domain from environment variables
-                $UserDomain = $ENV:USERDNSDOMAIN
-                if ($ENV:LOGONSERVER -and ($ENV:LOGONSERVER.Trim() -ne '') -and $UserDomain) {
-                    $BindServer = "$($ENV:LOGONSERVER -replace '\\','').$UserDomain"
-                }
-            }
+        if(!$DomainController) {
+            throw "Get-DomainSearcher: Error in retrieving PDC for current domain"
         }
-        elseif ($PSBoundParameters['Credential']) {
-            # if not -Domain is specified, but -Credential is, try to retrieve the current domain name with Get-Domain
-            $DomainObject = Get-Domain -Credential $Credential
-            $BindServer = ($DomainObject.PdcRoleOwner).Name
-            $TargetDomain = $DomainObject.Name
+    }
+
+    $SearchString = "LDAP://"
+
+    if($DomainController) {
+        $SearchString += $DomainController
+        if($Domain){
+            $SearchString += "/"
         }
-        elseif ($ENV:USERDNSDOMAIN -and ($ENV:USERDNSDOMAIN.Trim() -ne '')) {
-            # see if we can grab the user DNS logon domain from environment variables
-            $TargetDomain = $ENV:USERDNSDOMAIN
-            if ($ENV:LOGONSERVER -and ($ENV:LOGONSERVER.Trim() -ne '') -and $TargetDomain) {
-                $BindServer = "$($ENV:LOGONSERVER -replace '\\','').$TargetDomain"
-            }
+    }
+
+    if($ADSprefix) {
+        $SearchString += $ADSprefix + ","
+    }
+
+    if($ADSpath) {
+        if($ADSpath -like "GC://*") {
+            # if we're searching the global catalog
+            $DN = $AdsPath
+            $SearchString = ""
         }
         else {
-            # otherwise, resort to Get-Domain to retrieve the current domain object
-            write-verbose "get-domain"
-            $DomainObject = Get-Domain
-            $BindServer = ($DomainObject.PdcRoleOwner).Name
-            $TargetDomain = $DomainObject.Name
-        }
-
-        if ($PSBoundParameters['Server']) {
-            # if there's not a specified server to bind to, try to pull a logon server from ENV variables
-            $BindServer = $Server
-        }
-
-        $SearchString = 'LDAP://'
-
-        if ($BindServer -and ($BindServer.Trim() -ne '')) {
-            $SearchString += $BindServer
-            if ($TargetDomain) {
-                $SearchString += '/'
-            }
-        }
-
-        if ($PSBoundParameters['SearchBasePrefix']) {
-            $SearchString += $SearchBasePrefix + ','
-        }
-
-        if ($PSBoundParameters['SearchBase']) {
-            if ($SearchBase -Match '^GC://') {
-                # if we're searching the global catalog, get the path in the right format
-                $DN = $SearchBase.ToUpper().Trim('/')
-                $SearchString = ''
-            }
-            else {
-                if ($SearchBase -match '^LDAP://') {
-                    if ($SearchBase -match "LDAP://.+/.+") {
-                        $SearchString = ''
-                        $DN = $SearchBase
-                    }
-                    else {
-                        $DN = $SearchBase.SubString(7)
-                    }
+            if($ADSpath -like "LDAP://*") {
+                if($ADSpath -match "LDAP://.+/.+") {
+                    $SearchString = ""
                 }
                 else {
-                    $DN = $SearchBase
+                    $ADSpath = $ADSpath.Substring(7)
                 }
             }
+            $DN = $ADSpath
         }
-        else {
-            # transform the target domain name into a distinguishedName if an ADS search base is not specified
-            if ($TargetDomain -and ($TargetDomain.Trim() -ne '')) {
-                $DN = "DC=$($TargetDomain.Replace('.', ',DC='))"
-            }
-        }
-
-        $SearchString += $DN
-        Write-Verbose "[Get-DomainSearcher] search base: $SearchString"
-
-        if ($Credential -ne [Management.Automation.PSCredential]::Empty) {
-            Write-Verbose "[Get-DomainSearcher] Using alternate credentials for LDAP connection"
-            # bind to the inital search object using alternate credentials
-            $DomainObject = New-Object DirectoryServices.DirectoryEntry($SearchString, $Credential.UserName, $Credential.GetNetworkCredential().Password)
-            $Searcher = New-Object System.DirectoryServices.DirectorySearcher($DomainObject)
-        }
-        else {
-            # bind to the inital object using the current credentials
-            $Searcher = New-Object System.DirectoryServices.DirectorySearcher([ADSI]$SearchString)
-        }
-
-        $Searcher.PageSize = $ResultPageSize
-        $Searcher.SearchScope = $SearchScope
-        $Searcher.CacheResults = $False
-        $Searcher.ReferralChasing = [System.DirectoryServices.ReferralChasingOption]::All
-
-        if ($PSBoundParameters['ServerTimeLimit']) {
-            $Searcher.ServerTimeLimit = $ServerTimeLimit
-        }
-
-        if ($PSBoundParameters['Tombstone']) {
-            $Searcher.Tombstone = $True
-        }
-
-        if ($PSBoundParameters['LDAPFilter']) {
-            $Searcher.filter = $LDAPFilter
-        }
-
-        if ($PSBoundParameters['SecurityMasks']) {
-            $Searcher.SecurityMasks = Switch ($SecurityMasks) {
-                'Dacl' { [System.DirectoryServices.SecurityMasks]::Dacl }
-                'Group' { [System.DirectoryServices.SecurityMasks]::Group }
-                'None' { [System.DirectoryServices.SecurityMasks]::None }
-                'Owner' { [System.DirectoryServices.SecurityMasks]::Owner }
-                'Sacl' { [System.DirectoryServices.SecurityMasks]::Sacl }
-            }
-        }
-
-        if ($PSBoundParameters['Properties']) {
-            # handle an array of properties to load w/ the possibility of comma-separated strings
-            $PropertiesToLoad = $Properties| ForEach-Object { $_.Split(',') }
-            $Null = $Searcher.PropertiesToLoad.AddRange(($PropertiesToLoad))
-        }
-
-        $Searcher
     }
+    else {
+        if($Domain -and ($Domain.Trim() -ne "")) {
+            $DN = "DC=$($Domain.Replace('.', ',DC='))"
+        }
+    }
+
+    $SearchString += $DN
+    Write-Verbose "Get-DomainSearcher search string: $SearchString"
+
+    if($Credential) {
+        Write-Verbose "Using alternate credentials for LDAP connection"
+        $DomainObject = New-Object DirectoryServices.DirectoryEntry($SearchString, $Credential.UserName, $Credential.GetNetworkCredential().Password)
+        $Searcher = New-Object System.DirectoryServices.DirectorySearcher($DomainObject)
+    }
+    else {
+        $Searcher = New-Object System.DirectoryServices.DirectorySearcher([ADSI]$SearchString)
+    }
+
+    $Searcher.PageSize = $PageSize
+    $Searcher
 }
 
 
@@ -9369,6 +9234,100 @@ Custom PSObject with ACL entries.
     }
 }
 
+function Get-NetGmsa {
+<#
+.SYNOPSIS
+
+Search for all Group Managed Service Accounts in AD.
+
+Author: Jean-Francois Maes (@jfmaes)  
+License: BSD 3-Clause  
+Required Dependencies: Get-DomainSearcher, Get-ObjectACL
+
+.DESCRIPTION
+
+
+.PARAMETER Domain
+
+Specifies the domain to use for the query, defaults to the current domain.
+
+
+
+.PARAMETER DomainController
+
+Specifies an Active Directory server (domain controller) to bind to.
+
+
+.PARAMETER Credential
+
+A [Management.Automation.PSCredential] object of alternate credentials
+for connection to the target domain.
+
+
+ .PARAMETER ADSpath
+
+        The LDAP source to search through, e.g. "LDAP://OU=secret,DC=testlab,DC=local"
+        Useful for OU queries.
+    
+
+.OUTPUTS
+
+PowerView.GSMA
+
+Custom PSObject with translated gMSA property fields.
+#>
+
+    [CmdletBinding()]
+    Param (
+        [Parameter(ValueFromPipeline=$True)]
+        [String]
+        $gmsaName = '*',
+        
+        [String]
+        $Domain,
+
+        [String]
+        $DomainController,
+
+        [String]
+        $ADSpath,
+
+        [Switch]
+        $FullData,
+
+        [ValidateRange(1,10000)] 
+        [Int]
+        $PageSize = 200,
+
+        [Management.Automation.PSCredential]
+        $Credential
+    )
+
+    begin {
+        $GMSASearcher = Get-DomainSearcher -Domain $Domain -DomainController $DomainController -Credential $Credential -ADSpath $ADSpath -PageSize $PageSize
+    }
+    process {
+        if ($GMSASearcher) {
+                $GMSASearcher.filter="(&(ObjectClass=msDS-GroupManagedServiceAccount)(name=$gmsaName))"
+            }
+
+            try {
+                $GMSASearcher.FindAll() | Where-Object {$_} | ForEach-Object {
+                    if ($FullData) {
+                        # convert/process the LDAP fields for each result
+                        Convert-LDAPProperty -Properties $_.Properties
+                    }
+                    else { 
+                        # otherwise just returning the ADS paths of the OUs
+                        $_.properties.adspath
+                    }
+                }
+            }
+            catch {
+                Write-Warning $_
+            }
+        }
+  }
 
 function Get-DomainOU {
 <#
@@ -21305,6 +21264,175 @@ Returns all GPO delegations on a given GPO.
         }
     }
 }
+
+function Get-NetGmsa {
+<#
+.SYNOPSIS
+Search for all Group Managed Service Accounts in AD.
+Author: Jean-Francois Maes (@jfmaes)  
+License: BSD 3-Clause  
+Required Dependencies: Get-DomainSearcher, Get-ObjectACL
+.DESCRIPTION
+.PARAMETER Domain
+Specifies the domain to use for the query, defaults to the current domain.
+.PARAMETER DomainController
+Specifies an Active Directory server (domain controller) to bind to.
+.PARAMETER Credential
+A [Management.Automation.PSCredential] object of alternate credentials
+for connection to the target domain.
+ .PARAMETER ADSpath
+        The LDAP source to search through, e.g. "LDAP://OU=secret,DC=testlab,DC=local"
+        Useful for OU queries.
+    
+.OUTPUTS
+PowerView.GSMA
+Custom PSObject with translated gMSA property fields.
+#>
+
+    [CmdletBinding()]
+    Param (
+        [Parameter(ValueFromPipeline=$True)]
+        [String]
+        $gmsaName = '*',
+
+        [String]
+        $Domain,
+
+        [String]
+        $DomainController,
+
+        [String]
+        $ADSpath,
+
+        [Switch]
+        $FullData,
+
+        [ValidateRange(1,10000)] 
+        [Int]
+        $PageSize = 200,
+
+        [Management.Automation.PSCredential]
+        $Credential
+    )
+
+    begin {
+        $GMSASearcher = Get-DomainSearcher -Domain $Domain -DomainController $DomainController -Credential $Credential -ADSpath $ADSpath -PageSize $PageSize
+    }
+    process {
+        if ($GMSASearcher) {
+                $GMSASearcher.filter="(&(ObjectClass=msDS-GroupManagedServiceAccount)(name=$gmsaName))"
+            }
+
+            try {
+                $GMSASearcher.FindAll() | Where-Object {$_} | ForEach-Object {
+                    if ($FullData) {
+                        # convert/process the LDAP fields for each result
+                        Convert-LDAPProperty -Properties $_.Properties
+                    }
+                    else { 
+                        # otherwise just returning the ADS paths of the OUs
+                        $_.properties.adspath
+                    }
+                }
+            }
+            catch {
+                Write-Warning $_
+            }
+        }
+  }
+
+
+function Test-Administrator  
+{  
+    $user = [Security.Principal.WindowsIdentity]::GetCurrent();
+    (New-Object Security.Principal.WindowsPrincipal $user).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)  
+}
+
+
+function Get-FineGrainedPasswordPolicy {
+<#
+.SYNOPSIS
+Search for all Fine Grained password policies in AD. Function requires high integritry to return results
+Author: Jean-Francois Maes (@jfmaes)  
+License: BSD 3-Clause  
+Required Dependencies: Get-DomainSearcher, Get-ObjectACL
+.DESCRIPTION
+.PARAMETER Domain
+Specifies the domain to use for the query, defaults to the current domain.
+.PARAMETER DomainController
+Specifies an Active Directory server (domain controller) to bind to.
+.PARAMETER Credential
+A [Management.Automation.PSCredential] object of alternate credentials
+for connection to the target domain.
+ .PARAMETER ADSpath
+        The LDAP source to search through, e.g. "LDAP://OU=secret,DC=testlab,DC=local"
+        Useful for OU queries.
+    
+.OUTPUTS
+PowerView.pwpol
+Custom PSObject with translated pwpol property fields.
+#>
+
+    [CmdletBinding()]
+    Param (
+        [Parameter(ValueFromPipeline=$True)]
+        [String]
+        $policyName = '*',
+
+        [String]
+        $Domain,
+
+        [String]
+        $DomainController,
+
+        [String]
+        $ADSpath,
+
+        [Switch]
+        $FullData,
+
+        [ValidateRange(1,10000)] 
+        [Int]
+        $PageSize = 200,
+
+        [Management.Automation.PSCredential]
+        $Credential
+    )
+
+    begin {
+        $FineGrainedSearcher = Get-DomainSearcher -Domain $Domain -DomainController $DomainController -Credential $Credential -ADSpath $ADSpath -PageSize $PageSize
+    }
+    process {
+    
+    $isadmin = Test-Administrator
+    if($isadmin){
+        if ($FineGrainedSearcher) {
+                $FineGrainedSearcher.filter="(&(ObjectClass=msDS-PasswordSettings)(Name=$policyName))"
+            }
+
+            try {
+                $FineGrainedSearcher.FindAll() | Where-Object {$_} | ForEach-Object {
+                    if ($FullData) {
+                        # convert/process the LDAP fields for each result
+                        Convert-LDAPProperty -Properties $_.Properties
+                    }
+                    else { 
+              
+                        $_.properties.adspath
+                    }
+                }
+            }
+            catch {
+                Write-Warning $_
+            }
+        }
+         else{
+    Write-Warning 'Get-FineGrainedPasswordPolicy will only work when run from high integrity context.'
+    }
+    }
+   
+  }
+
 
 
 ########################################################
