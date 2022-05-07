@@ -5,7 +5,7 @@
 # Author: Diego Blanco <diego.blanco@treitos.com>
 # GitHub: https://github.com/diego-treitos/linux-smart-enumeration
 #
-lse_version="4.4nw"
+lse_version="4.5nw"
 
 ##( Colors
 #
@@ -481,7 +481,7 @@ lse_show_info() { #(
 	fi
   cecho "${lblue}Architecture:${reset} $lse_arch\n"
   echo
-  echo  "${green}=====================(${yellow} Current Output Verbosity Level: ${cyan}$lse_level ${green})======================${reset}"
+  cecho  "${green}=====================(${yellow} Current Output Verbosity Level: ${cyan}$lse_level ${green})======================${reset}"
   echo
 } #)
 lse_serve() { #(
