@@ -111,8 +111,9 @@
         $SeasonList = @((Get-Season $((Get-Date).AddMonths(-1))), (Get-Season $(Get-Date)), (Get-Season $((Get-Date).AddMonths(1))))
         $SeasonList = $SeasonList |Sort-Object -Unique
         $MonthList = @((Get-Culture).DateTimeFormat.GetMonthName((Get-Date).AddMonths(-1).Month), (Get-Culture).DateTimeFormat.GetMonthName((Get-Date).Month), (Get-Culture).DateTimeFormat.GetMonthName((Get-Date).AddMonths(1).Month))
-        $SeedList = $SeasonList + $MonthList
+        $SeedList = $SeasonList + $MonthList |Sort-Object -Unique
         $PasswordList = Generate-Passwords($SeedList)
+	$PasswordList = $PasswordList |Sort-Object {Get-Random}
     }
     if (([string]::IsNullOrEmpty($PasswordList))) {
         Write-Output "[-] The PasswordList variable is empty; the script will exit."
