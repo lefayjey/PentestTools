@@ -629,7 +629,12 @@ Outputs a custom object containing the SamAccountName, ServicePrincipalName, and
                         $Hash = $null
                         $Out | Add-Member Noteproperty 'TicketByteHexStream' ([Bitconverter]::ToString($TicketByteStream).Replace('-',''))
                     } else {
-                        $Hash = "$($CipherText.Substring(0,32))`$$($CipherText.Substring(32))"
+                        if($Etype -eq 17 -or $Etype -eq 18) {
+                            $ChecksumLen = 24
+                        } else {
+                            $ChecksumLen = 32
+                        }
+                        $Hash = "$($CipherText.Substring(0,$ChecksumLen))`$$($CipherText.Substring($ChecksumLen))"
                         $Out | Add-Member Noteproperty 'TicketByteHexStream' $null
                     }
                 } else {
