@@ -731,7 +731,7 @@ New-Struct. :P
 #
 ########################################################
 
-Function New-DynamicParameter {
+function New-DynamicParameter {
 <#
 .SYNOPSIS
 
