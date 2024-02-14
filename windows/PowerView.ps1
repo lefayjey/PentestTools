@@ -6283,7 +6283,6 @@ http://blogs.technet.com/b/ashleymcglone/archive/2013/03/25/active-directory-ou-
     $GUIDs
 }
 
-
 function Get-DomainComputer {
 <#
 .SYNOPSIS
@@ -6777,17 +6776,23 @@ The raw DirectoryServices.SearchResult object, if -Raw is enabled.
                 $Prop = $_.Properties
             }
 
+            # Convert the 'dnshostname' property to a string and check if it is not empty
+            $dnshostname = $Prop['dnshostname'] -join ''  # Join all elements to form a string
+            if (-not ($dnshostname -and $dnshostname.Trim() -ne '')) {
+                # Skip this entry if dnshostname is missing or empty
+                return
+            }
+
             $Up = $True
             if ($PSBoundParameters['Ping']) {
-                $Up = Test-Connection -Count 1 -Quiet -ComputerName $Prop.dnshostname
+                $Up = Test-Connection -Count 1 -Quiet -ComputerName $dnshostname
             }
             if ($Up) {
                 if ($PSBoundParameters['Raw']) {
                     # return raw result objects
                     $Computer = $_
                     $Computer.PSObject.TypeNames.Insert(0, 'PowerView.Computer.Raw')
-                }
-                else {
+                } else {
                     $Computer = Convert-LDAPProperty -Properties $Prop
                     $Computer.PSObject.TypeNames.Insert(0, 'PowerView.Computer')
                 }
@@ -6802,7 +6807,6 @@ The raw DirectoryServices.SearchResult object, if -Raw is enabled.
         }
     }
 }
-
 
 function Get-DomainObject {
 <#
