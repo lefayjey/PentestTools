@@ -258,7 +258,7 @@ function Countdown-Timer
     )
     if ($quiet)
     {
-        Write-Host "$Message: Waiting for $($Seconds/60) minutes. $($Seconds - $Count)"
+        Write-Host "${Message}: Waiting for $($Seconds/60) minutes. $($Seconds - $Count)"
         Start-Sleep -Seconds $Seconds
     } else {
         foreach ($Count in (1..$Seconds))
@@ -448,7 +448,7 @@ function Get-DomainUserList
     $UserSearcher.PageSize = 1000
     $AllUserObjects = $UserSearcher.FindAll()
     Write-Host -ForegroundColor "yellow" ("[*] There are " + $AllUserObjects.count + " total users found.")
-    $UserListArray = @()
+    $UserListArray = [System.Collections.Generic.List[String]]::new()
 
     if ($RemovePotentialLockouts)
     {
@@ -479,7 +479,7 @@ function Get-DomainUserList
                 # observation window add user to spray list
                 if (($timedifference -gt $observation_window) -or ($attemptsuntillockout -gt 1))
                                 {
-                    $UserListArray += $samaccountname
+                    $UserListArray.Add($samaccountname)
                 }
             }
         }
@@ -489,7 +489,7 @@ function Get-DomainUserList
         foreach ($user in $AllUserObjects)
         {
             $samaccountname = $user.Properties.samaccountname
-            $UserListArray += $samaccountname
+            $UserListArray.Add($samaccountname)
         }
     }
 
@@ -566,6 +566,7 @@ function Get-ObservationWindow($DomainEntry)
 {
     # Get account lockout observation window to avoid running more than 1
     # password spray per observation window.
+    $DomainEntry = [ADSI]$DomainEntry
     $lockObservationWindow_attr = $DomainEntry.Properties['lockoutObservationWindow']
     $observation_window = $DomainEntry.ConvertLargeIntegerToInt64($lockObservationWindow_attr.Value) / -600000000
     return $observation_window
